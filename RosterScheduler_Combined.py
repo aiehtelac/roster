@@ -96,6 +96,7 @@ ROSTER_CONFIGS = {
         }],
         "required_cols": ["Name","Team","Ward","Subspec","EligibleShifts","SpecialReq"],
         "date_col_start": 6,
+        "export_skip_cols": ["SpecialReq"],
         "color_priority": ["LEAVE","POSTCALL","COURSE","SUBSPEC","AUTOBLOCK","REQUEST","BLOCK"],
     },
 
@@ -979,7 +980,8 @@ class RosterScheduler:
             elif d in self.pre_phs:
                 ws[f"{col_letter}1"] = "PRE"
 
-        meta_cols = self.cfg["required_cols"]
+        skip_cols = set(self.cfg.get("export_skip_cols", []))
+        meta_cols = [c for c in self.cfg["required_cols"] if c not in skip_cols]
         for row_idx, (s, staff) in enumerate(self.staff_data.iterrows()):
             row = 6 + row_idx
             for ci, col in enumerate(meta_cols):
