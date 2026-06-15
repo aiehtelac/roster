@@ -910,7 +910,7 @@ class RosterScheduler:
         dt0 = self._parse(self.dates[0])
         if dt0:
             ws["B1"] = dt0.strftime("%B %Y")
-            ws["I5"] = dt0
+            ws["J5"] = dt0
 
         for col_idx, d in enumerate(self.dates):
             if col_idx >= 36:
@@ -927,7 +927,7 @@ class RosterScheduler:
             for ci, col in enumerate(meta_cols):
                 ws.cell(row=row, column=2+ci, value=staff.get(col,""))
             for col_idx, d in enumerate(self.dates):
-                col  = 9 + col_idx
+                col  = 10 + col_idx
                 cell = ws.cell(row=row, column=col)
                 val  = str(staff.get(d,"")).strip().upper()
                 cell.value = self._get_assigned(solver, sv, s, d)

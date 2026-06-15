@@ -19,7 +19,8 @@ st.title("Roster Scheduler")
 
 # ── Session state ─────────────────────────────────────────────────────────────
 
-for _k, _v in [("result_bytes", None), ("result_name", None),
+for _k, _v in [("result_xlsx_bytes", None), ("result_xlsx_name", None),
+               ("result_csv_bytes", None),  ("result_csv_name", None),
                ("solve_log", None), ("error", None)]:
     if _k not in st.session_state:
         st.session_state[_k] = _v
@@ -269,10 +270,12 @@ with tab_run:
         st.info("Upload a staff CSV in the sidebar to continue.")
 
     if st.button("Generate Roster", disabled=not csv_file, type="primary"):
-        st.session_state.result_bytes = None
-        st.session_state.result_name  = None
-        st.session_state.solve_log    = None
-        st.session_state.error        = None
+        st.session_state.result_xlsx_bytes = None
+        st.session_state.result_xlsx_name  = None
+        st.session_state.result_csv_bytes  = None
+        st.session_state.result_csv_name   = None
+        st.session_state.solve_log         = None
+        st.session_state.error             = None
 
         log_buf    = io.StringIO()
         old_stdout = sys.stdout
@@ -321,20 +324,18 @@ with tab_run:
                     else:
                         skip = {"template.xlsx", "prev.xlsx", "input.csv"}
 
-                        # Prefer xlsx output, fall back to csv
-                        output_bytes, output_name = None, None
-                        for ext in (".xlsx", ".csv"):
-                            for fname in sorted(os.listdir(tmpdir)):
-                                if fname not in skip and fname.endswith(ext):
-                                    with open(os.path.join(tmpdir, fname), "rb") as f:
-                                        output_bytes = f.read()
-                                    output_name = fname
-                                    break
-                            if output_bytes:
-                                break
-
-                        st.session_state.result_bytes = output_bytes
-                        st.session_state.result_name  = output_name
+                        for fname in sorted(os.listdir(tmpdir)):
+                            if fname in skip:
+                                continue
+                            fpath = os.path.join(tmpdir, fname)
+                            with open(fpath, "rb") as f:
+                                data = f.read()
+                            if fname.endswith(".xlsx"):
+                                st.session_state.result_xlsx_bytes = data
+                                st.session_state.result_xlsx_name  = fname
+                            elif fname.endswith(".csv"):
+                                st.session_state.result_csv_bytes = data
+                                st.session_state.result_csv_name  = fname
 
         except Exception as exc:
             sys.stdout = old_stdout
@@ -346,19 +347,23 @@ with tab_run:
     if st.session_state.error:
         st.error(st.session_state.error)
 
-    if st.session_state.result_bytes:
-        fname = st.session_state.result_name or "roster_output"
-        mime  = (
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if fname.endswith(".xlsx") else "text/csv"
-        )
-        st.success(f"Roster generated: **{fname}**")
-        st.download_button(
-            label="⬇ Download",
-            data=st.session_state.result_bytes,
-            file_name=fname,
-            mime=mime,
-        )
+    if st.session_state.result_xlsx_bytes or st.session_state.result_csv_bytes:
+        st.success("Roster generated.")
+        dl_cols = st.columns(2)
+        if st.session_state.result_xlsx_bytes:
+            dl_cols[0].download_button(
+                label="⬇ Download Excel",
+                data=st.session_state.result_xlsx_bytes,
+                file_name=st.session_state.result_xlsx_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        if st.session_state.result_csv_bytes:
+            dl_cols[1].download_button(
+                label="⬇ Download CSV",
+                data=st.session_state.result_csv_bytes,
+                file_name=st.session_state.result_csv_name,
+                mime="text/csv",
+            )
 
     if st.session_state.solve_log:
         with st.expander("Solver log"):
