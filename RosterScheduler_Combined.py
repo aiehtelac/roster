@@ -363,6 +363,7 @@ class RosterScheduler:
         self.base_year: int | None = None
         self.prev_month_data:  dict[str, dict] = {}
         self._prev_month_rows: list = []
+        self._prev_month_hdrs: list = []
 
         self.staff_data  = None
         self.dates: list[str] = []
@@ -1034,7 +1035,8 @@ class RosterScheduler:
                 elif vs == "total months":
                     cum_months_col = col
 
-            last2 = date_cols[-2:] if len(date_cols) >= 2 else date_cols
+            last2       = date_cols[-2:] if len(date_cols) >= 2 else date_cols
+            self._prev_month_hdrs = [prev_ws.cell(row=5, column=lc).value for lc in last2]
             print(f"  Month-1: last date cols {last2}, calls col {calls_col}, "
                    f"cum_pts col {cum_pts_col}, "
                   f"months col {cum_months_col}")
@@ -1082,6 +1084,9 @@ class RosterScheduler:
             if "Month-1" not in wb.sheetnames:
                 wb.create_sheet("Month-1")
             m1 = wb["Month-1"]
+
+            for ci, hdr in enumerate(self._prev_month_hdrs):
+                m1.cell(row=2, column=3 + ci, value=hdr)
 
             for r in range(3, m1.max_row + 1):
                 for c in range(2, 8):
