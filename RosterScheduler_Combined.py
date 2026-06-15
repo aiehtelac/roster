@@ -910,12 +910,12 @@ class RosterScheduler:
         dt0 = self._parse(self.dates[0])
         if dt0:
             ws["B1"] = dt0.strftime("%B %Y")
-            ws["J5"] = dt0
+            ws["I5"] = dt0
 
         for col_idx, d in enumerate(self.dates):
             if col_idx >= 36:
                 break
-            col_letter = get_column_letter(10 + col_idx)
+            col_letter = get_column_letter(9 + col_idx)
             if self._is_ph(d):
                 ws[f"{col_letter}1"] = "Y"
             elif d in self.pre_phs:
@@ -927,7 +927,7 @@ class RosterScheduler:
             for ci, col in enumerate(meta_cols):
                 ws.cell(row=row, column=2+ci, value=staff.get(col,""))
             for col_idx, d in enumerate(self.dates):
-                col  = 10 + col_idx
+                col  = 9 + col_idx
                 cell = ws.cell(row=row, column=col)
                 val  = str(staff.get(d,"")).strip().upper()
                 cell.value = self._get_assigned(solver, sv, s, d)
