@@ -102,6 +102,7 @@ with tab_cfg:
     _CAT_ORDER  = ["main", "weekend_extra", "cicu", "hybrid_shift", "wr", "sb", "half"]
 
     # ── Shift Categories ──────────────────────────────────────────────────────
+    st.caption("Leave as is to keep the default settings")
     st.subheader("Shift Categories")
     st.caption(
         "Edit shift names as comma-separated values. "
@@ -193,12 +194,20 @@ with tab_cfg:
 
     # ── Limits ────────────────────────────────────────────────────────────────
     st.subheader("Limits")
+    _LIM_HINTS = {
+        "wr_max":      "Maximum WR shifts per person",
+        "sb_max":      "Maximum SB shifts per person",
+        "rp_r3_max":   "Maximum R3 shifts for RPs",
+        "ac_call_min": "Minimum total calls for ACs",
+        "ac_call_max": "Maximum total calls for ACs",
+    }
     lim      = cfg["limits"]
     lim_cols = st.columns(min(len(lim), 4))
     for i, (k, v) in enumerate(lim.items()):
         with lim_cols[i % len(lim_cols)]:
             lim[k] = st.number_input(
                 k, min_value=0, max_value=20, value=int(v),
+                help=_LIM_HINTS.get(k),
                 key=f"lim_{roster_type}_{k}",
             )
 
@@ -207,12 +216,18 @@ with tab_cfg:
     # ── Soft Penalty Weights ──────────────────────────────────────────────────
     st.subheader("Soft Penalty Weights")
     pen      = cfg["soft_penalties"]
-    pen_cols = st.columns(len(pen))
+    pen_cols = st.columns(len(pen) + 1)
     for i, (k, v) in enumerate(pen.items()):
         pen[k] = pen_cols[i].number_input(
             k, min_value=0, max_value=500, value=int(v),
             key=f"pen_{roster_type}_{k}",
         )
+    cfg["team_pref_penalty"] = pen_cols[len(pen)].number_input(
+        "Team pref", min_value=0, max_value=500,
+        value=int(cfg.get("team_pref_penalty", 2)),
+        help="Penalty per shift assigned outside a staff member's preferred team shift",
+        key=f"team_pref_{roster_type}",
+    )
 
     st.divider()
 

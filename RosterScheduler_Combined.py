@@ -71,10 +71,10 @@ ROSTER_CONFIGS = {
             "saturday":4,"ph":4,"sunday":3,"friday":3,"pre_ph":3,"weekday":1,
         },
         "call_points_scale": 1,
-        "soft_penalties": {"AUTOBLOCK":100,"BLOCK":30,"REQUEST":30},
-        "hard_blocks":    ["POSTCALL","COURSE","SUBSPEC","CLINIC"],
+        "soft_penalties": {"BLOCK":30,"REQUEST":30},
+        "hard_blocks":    ["POSTCALL","COURSE","SUBSPEC","CLINIC","AUTOBLOCK"],
         "leave_values":   ["LEAVE"],
-        "limits":         {"wr_max":2,"sb_max":3},
+        "limits":         {"wr_max":2,"sb_max":2},
         "eligible_shifts_mode": "cicushift_only",
         "new_block_days": 10,
         "new_phantom_points": 4,
@@ -83,7 +83,7 @@ ROSTER_CONFIGS = {
             "A":["MO1"],"HA":["MO1"],"B":["MO2"],
             "C":["MO3"],"D":["MO3","MO4"],"CICU":["MO6"],
         },
-        "team_pref_penalty": 5,
+        "team_pref_penalty": 2,
         "fairness_pools": [{
             "label": "Regular Staff",
             "exclude_subtypes": ["FAMMED","ELECTIVES"],
@@ -120,8 +120,8 @@ ROSTER_CONFIGS = {
         },
         "call_points_scale": 2,
         "ho6_points": 2,   # flat 1.0pt stored ×2
-        "soft_penalties": {"AUTOBLOCK":100,"BLOCK":50,"REQUEST":50},
-        "hard_blocks":    ["POSTCALL", "LEAVE"],
+        "soft_penalties": {"BLOCK":50,"REQUEST":50,"NEW":10},
+        "hard_blocks":    ["POSTCALL","LEAVE","AUTOBLOCK"],
         "leave_values":   ["LEAVE"],
         "limits":         {"wr_max":2,"sb_max":2},
         "eligible_shifts_mode": "none",
@@ -131,19 +131,19 @@ ROSTER_CONFIGS = {
         "team_preferences": {
             "A":["HO1"],"HA":["HO1"],"B":["HO2"],"C":["HO3"],"D":["HO3","HO4"],
         },
-        "team_pref_penalty": 5,
+        "team_pref_penalty": 2,
         "fairness_pools": [{
             "label": "All HO Staff",
             "exclude_subtypes": [],
             "exclude_tags":     [],
             "metrics": {
-                "pts":40,"cross_month":15,"golden_wknds":5,"shift_spacing":5,
-                "wr_count":1,"sb_count":1,"full_calls":0,"sat_calls":0,
+                "pts":30,"cross_month":15,"golden_wknds":5,"shift_spacing":5,
+                "wr_count":1,"sb_count":1,"full_calls":10,"sat_calls":0,
             },
         }],
         "required_cols": ["Name","Team","Ward","SpecialReq"],
         "date_col_start": 5,
-        "color_priority": ["LEAVE","POSTCALL","AUTOBLOCK","REQUEST","BLOCK"],
+        "color_priority": ["LEAVE","POSTCALL","AUTOBLOCK","REQUEST","BLOCK","NEW"],
     },
 
     "REG": {
@@ -169,8 +169,8 @@ ROSTER_CONFIGS = {
             "saturday":8,"ph":6,"sunday":6,"friday":2,"weekday":1,
         },
         "call_points_scale": 2,
-        "soft_penalties": {"AUTOBLOCK":100,"BLOCK":30,"REQUEST":30},
-        "hard_blocks":    ["POSTCALL","COURSE","SUBSPEC","CLINIC"],
+        "soft_penalties": {"BLOCK":30,"REQUEST":30},
+        "hard_blocks":    ["POSTCALL","COURSE","SUBSPEC","CLINIC","AUTOBLOCK"],
         "leave_values":   ["LEAVE"],
         "limits":         {"wr_max":2,"sb_max":0,"rp_r3_max":3,"ac_call_min":1,"ac_call_max":2},
         "eligible_shifts_mode": "whitelist",
@@ -178,7 +178,7 @@ ROSTER_CONFIGS = {
         "new_phantom_points": 0,
         "vikas_days":     [],
         "team_preferences": {},
-        "team_pref_penalty": 5,
+        "team_pref_penalty": 2,
         "fairness_pools": [
             {
                 "label": "SR Pool",
@@ -558,7 +558,7 @@ class RosterScheduler:
 
         self._enforce_max_one_shift_per_day(model, worked)
         self._add_daily_requirements(model, sv, N, D)
-        self._add_rest_constraints(model, worked, N, D)
+        self._add_rest_constraints(model, sv, worked, N, D)
         self._add_eligible_shift_gating(model, sv, N)
         self._add_hard_blocks(model, sv, N)
         penalties = self._add_soft_penalties(model, sv, N)
@@ -610,13 +610,19 @@ class RosterScheduler:
                     slots = entry.get("slots", {}).get(rk, 0)
                     model.Add(sum(col_sum[(d, sh)] for sh in names) == slots)
 
-    def _add_rest_constraints(self, model, worked, N, D):
-        """2 rest days after any shift."""
+    def _add_rest_constraints(self, model, sv, worked, N, D):
+        """1 rest day after WR; 2 rest days after all other shifts."""
+        wr_set    = set(self._sc_names("wr"))
+        non_wr_sh = [sh for sh in self._all_shifts if sh not in wr_set]
+
         for s in range(N):
+            # Day after: blocked after any shift
             for i in range(len(D) - 1):
                 model.Add(worked[s][i] + worked[s][i+1] <= 1)
+            # Two days after: blocked only after a non-WR shift
+            non_wr_worked = [sum(sv[(s,d,sh)] for sh in non_wr_sh) for d in D]
             for i in range(len(D) - 2):
-                model.Add(worked[s][i] + worked[s][i+2] <= 1)
+                model.Add(non_wr_worked[i] + worked[s][i+2] <= 1)
 
     def _add_eligible_shift_gating(self, model, sv, N):
         """Apply EligibleShifts constraints per eligible_shifts_mode:
@@ -693,7 +699,7 @@ class RosterScheduler:
     def _add_team_preferences(self, model, sv, N, penalties: list):
         cfg   = self.cfg
         prefs = cfg.get("team_preferences", {})
-        w     = cfg.get("team_pref_penalty", 5)
+        w     = cfg.get("team_pref_penalty", 2)
         if not prefs or "Team" not in self.staff_data.columns:
             return
 
@@ -786,7 +792,7 @@ class RosterScheduler:
         solver.parameters.max_time_in_seconds   = time_limit
         solver.parameters.num_search_workers    = workers
         solver.parameters.log_search_progress   = True
-        solver.parameters.log_to_stdout         = True
+        solver.parameters.log_to_stdout         = FALSE
         status = solver.Solve(model, _Progress())
 
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -885,6 +891,7 @@ class RosterScheduler:
             "SUBSPEC":   "C9D7F8",
             "REQUEST":   "E2EFDA",
             "BLOCK":     "FFCDD2",
+            "NEW":       "FFF9C4",
             "weekend":   "E7E6E6",
         }
         prio = self.cfg["color_priority"]
@@ -908,7 +915,7 @@ class RosterScheduler:
         for col_idx, d in enumerate(self.dates):
             if col_idx >= 36:
                 break
-            col_letter = get_column_letter(9 + col_idx)
+            col_letter = get_column_letter(10 + col_idx)
             if self._is_ph(d):
                 ws[f"{col_letter}1"] = "Y"
             elif d in self.pre_phs:
@@ -1229,7 +1236,7 @@ class HORosterScheduler(RosterScheduler):
             print(f"HO cross-month: global avg {global_avg:.2f} pts/month "
                   f"({len(self.prev_month_data)} staff records)")
 
-        pts_v, wr_v, sb_v, gw_v, gap_v, dev_v = [], [], [], [], [], []
+        pts_v, wr_v, sb_v, fc_v, gw_v, gap_v, dev_v = [], [], [], [], [], [], []
 
         for s, staff in self.staff_data.iterrows():
             _, phantom = self._get_tags(staff)
@@ -1247,6 +1254,7 @@ class HORosterScheduler(RosterScheduler):
 
             wr_v.append(self._make_count_var(model, sv, s, self.dates, wr_sh, 5, f"wrcnt_ho{s}"))
             sb_v.append(self._make_count_var(model, sv, s, self.dates, sb_sh, 5, f"sbcnt_ho{s}"))
+            fc_v.append(self._make_count_var(model, sv, s, self.dates, ho_sh + ho6, 20, f"fccnt_ho{s}"))
 
             gw = model.NewIntVar(0, len(gw_triplets)+1, f"gw{s}")
             gw_bools = []
@@ -1284,7 +1292,7 @@ class HORosterScheduler(RosterScheduler):
                     model.Add(dev >= target_scaled - raw)
                     dev_v.append(dev)
 
-        vmap  = {"pts":(pts_v,1000),"wr_count":(wr_v,5),"sb_count":(sb_v,5),
+        vmap  = {"pts":(pts_v,1000),"full_calls":(fc_v,20),"wr_count":(wr_v,5),"sb_count":(sb_v,5),
                  "golden_wknds":(gw_v,len(gw_triplets)+1),"shift_spacing":(gap_v,500)}
         terms = self._build_fairness_terms(model, vmap, w, "ho")
 
