@@ -792,7 +792,7 @@ class RosterScheduler:
         solver.parameters.max_time_in_seconds   = time_limit
         solver.parameters.num_search_workers    = workers
         solver.parameters.log_search_progress   = True
-        solver.parameters.log_to_stdout         = FALSE
+        solver.parameters.log_to_stdout         = False
         status = solver.Solve(model, _Progress())
 
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):

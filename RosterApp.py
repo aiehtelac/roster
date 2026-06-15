@@ -186,7 +186,6 @@ with tab_cfg:
         cfg["ho6_points"] = st.number_input(
             "Half call points (HO6)",
             min_value=0, max_value=20, value=int(cfg["ho6_points"]),
-            help=f"Stored ×{scale}. Set to {scale} for 1.0 displayed point.",
             key=f"ho6pts_{roster_type}",
         )
 
@@ -232,6 +231,16 @@ with tab_cfg:
     st.divider()
 
     # ── Fairness Weights ──────────────────────────────────────────────────────
+    _METRIC_HINTS = {
+        "pts":           "Total call points",
+        "full_calls":    "Number of calls",
+        "sat_calls":     "Number of Saturday calls",
+        "wr_count":      "Number of WR shifts",
+        "sb_count":      "Number of SB shifts",
+        "golden_wknds":  "Fri–Sat–Sun triplets completely free",
+        "shift_spacing": "Penalises > 2 calls in any 5-day window",
+        "cross_month":   "Deviation from running call-point average across months",
+    }
     st.subheader("Fairness Weights")
     for pool in cfg["fairness_pools"]:
         st.markdown(f"**{pool['label']}**")
@@ -241,6 +250,7 @@ with tab_cfg:
             with m_cols[i % len(m_cols)]:
                 pool["metrics"][k] = st.number_input(
                     k, min_value=0, max_value=200, value=int(default),
+                    help=_METRIC_HINTS.get(k),
                     key=f"m_{roster_type}_{pool['label']}_{k}",
                 )
 
