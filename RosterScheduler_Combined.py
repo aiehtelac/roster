@@ -142,7 +142,7 @@ ROSTER_CONFIGS = {
             },
         }],
         "required_cols": ["Name","Team","Ward","SpecialReq"],
-        "date_col_start": 5,
+        "date_col_start": 4,
         "color_priority": ["LEAVE","POSTCALL","AUTOBLOCK","REQUEST","BLOCK","NEW"],
     },
 
@@ -360,6 +360,7 @@ class RosterScheduler:
         self.template_path   = template_path
         self.prev_month_path = prev_month_path
         self.public_holidays: list[str] = []
+        self.base_year: int | None = None
         self.prev_month_data:  dict[str, dict] = {}
         self._prev_month_rows: list = []
 
@@ -393,10 +394,21 @@ class RosterScheduler:
         names = self.cfg["shift_categories"].get("hybrid_shift", {}).get("names", [])
         return names[0] if names else None
 
+    @property
+    def _call_count(self) -> list[str]:
+        """All shifts that count as a call — everything except WR and SB."""
+        return self._sc_names("main", "weekend_extra", "cicu", "hybrid_shift", "half")
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def set_public_holidays(self, holidays: list[str]):
         self.public_holidays = list(holidays)
+        self._dtype_cache.clear()
+
+    def set_base_year(self, year: int | None):
+        """Anchor year for yearless date headers (e.g. '3-Jun')."""
+        self.base_year = int(year) if year else None
+        self._date_cache.clear()
         self._dtype_cache.clear()
 
     # ── Date helpers ──────────────────────────────────────────────────────────
@@ -405,6 +417,46 @@ class RosterScheduler:
         if dc not in self._date_cache:
             self._date_cache[dc] = _parse_date(dc)
         return self._date_cache[dc]
+
+    @staticmethod
+    def _raw_date_parts(dc: str) -> tuple[int, int, int | None] | None:
+        """Parse a header into (day, month, year|None) without guessing a year."""
+        dc = str(dc).strip()
+        for sep in ("-", " "):
+            parts = dc.split(sep)
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1] in _MONTH_MAP:
+                year = None
+                if len(parts) >= 3 and parts[2].isdigit():
+                    y = int(parts[2]); year = y + 2000 if y < 100 else y
+                return int(parts[0]), _MONTH_MAP[parts[1]], year
+        if dc.count("/") == 2:
+            d, m, y = dc.split("/")
+            if d.isdigit() and m.isdigit() and y.isdigit():
+                yi = int(y); yi += 2000 if yi < 100 else 0
+                return int(d), int(m), yi
+        r = pd.to_datetime(dc, errors="coerce")
+        return None if pd.isna(r) else (r.day, r.month, r.year)
+
+    def _resolve_date_headers(self, raw_cols: list[str]):
+        """Pre-resolve date headers into self._date_cache using one anchor year,
+        rolling forward on a Dec→Jan month wrap. Yearless headers fall back to
+        base_year, then today's year."""
+        parsed = [(dc, self._raw_date_parts(dc)) for dc in raw_cols]
+        anchor_year = next((p[2] for _, p in parsed if p and p[2] is not None), None)
+        if anchor_year is None:
+            anchor_year = self.base_year or datetime.today().year
+        anchor_month = next((p[1] for _, p in parsed if p), 1)
+        for dc, p in parsed:
+            if not p:
+                self._date_cache[dc] = None
+                continue
+            day, month, yr = p
+            if yr is None:
+                yr = anchor_year + (1 if month < anchor_month else 0)
+            try:
+                self._date_cache[dc] = datetime(yr, month, day)
+            except ValueError:
+                self._date_cache[dc] = None
 
     def _is_ph(self, dc: str) -> bool:
         dt = self._parse(dc)
@@ -466,6 +518,7 @@ class RosterScheduler:
         self.weekdays, self.saturdays, self.sundays = [], [], []
         self.phs, self.fridays, self.pre_phs = [], set(), set()
 
+        self._resolve_date_headers(list(self.staff_data.columns)[start:])
         for dc in list(self.staff_data.columns)[start:]:
             if self._parse(dc) is None:
                 print(f"Warning: cannot parse '{dc}' — skipped")
@@ -676,6 +729,7 @@ class RosterScheduler:
     def _add_soft_penalties(self, model, sv, N) -> list:
         pen_cfg   = self.cfg["soft_penalties"]
         all_sh    = self._all_shifts
+        main_sh   = self._call_count
         penalties = []
 
         for s, staff in self.staff_data.iterrows():
@@ -685,13 +739,13 @@ class RosterScheduler:
                     continue
                 w = pen_cfg[val]
                 if val == "REQUEST":
+                    # fulfilled only by a main shift
                     p = model.NewBoolVar(f"pr_{s}_{d}")
-                    model.Add(sum(sv[(s,d,sh)] for sh in all_sh) + p >= 1)
+                    model.Add(sum(sv[(s,d,sh)] for sh in main_sh) + p >= 1)
                     penalties.append((p, w))
                 else:
-                    p = model.NewBoolVar(f"pb_{s}_{d}")
-                    model.Add(sum(sv[(s,d,sh)] for sh in all_sh) <= p)
-                    penalties.append((p, w))
+                    # any shift triggers the penalty
+                    penalties.append((sum(sv[(s,d,sh)] for sh in all_sh), w))
 
         print(f"Soft penalties: {len(penalties)} terms")
         return penalties
@@ -703,7 +757,7 @@ class RosterScheduler:
         if not prefs or "Team" not in self.staff_data.columns:
             return
 
-        call_shifts    = self._sc_names("main", "weekend_extra", "cicu")
+        call_shifts    = self._call_count
         non_pref_by_team = {
             team: [sh for sh in call_shifts if sh not in pref]
             for team, pref in prefs.items()
@@ -714,9 +768,7 @@ class RosterScheduler:
             non_pref = non_pref_by_team.get(team, [])
             for sh in non_pref:
                 for d in self.dates:
-                    p = model.NewBoolVar(f"pref_{s}_{sh}_{d}")
-                    model.Add(sv[(s,d,sh)] <= p)
-                    penalties.append((p, w))
+                    penalties.append((sv[(s,d,sh)], w))
 
     # ── Limits helpers ────────────────────────────────────────────────────────
 
@@ -912,8 +964,13 @@ class RosterScheduler:
             ws["B1"] = dt0.strftime("%B %Y")
             ws["I5"] = dt0
 
+        cap = self._template_date_capacity(ws)
+        if len(self.dates) > cap:
+            print(f"WARNING: {len(self.dates)} dates exceed template capacity "
+                  f"({cap}); extra days not written to Excel")
+
         for col_idx, d in enumerate(self.dates):
-            if col_idx >= 36:
+            if col_idx >= cap:
                 break
             col_letter = get_column_letter(9 + col_idx)
             if self._is_ph(d):
@@ -927,6 +984,8 @@ class RosterScheduler:
             for ci, col in enumerate(meta_cols):
                 ws.cell(row=row, column=2+ci, value=staff.get(col,""))
             for col_idx, d in enumerate(self.dates):
+                if col_idx >= cap:
+                    break
                 col  = 9 + col_idx
                 cell = ws.cell(row=row, column=col)
                 val  = str(staff.get(d,"")).strip().upper()
@@ -938,6 +997,15 @@ class RosterScheduler:
                     cell.fill = PatternFill(start_color=hex_col, end_color=hex_col,
                                             fill_type="solid")
         wb.save(xl_path)
+
+    def _template_date_capacity(self, ws, default: int = 36) -> int:
+        """Date columns available before summary columns (scans row 5 from col I)."""
+        markers = {"total # of calls", "total call points", "total months"}
+        for col in range(9, 9 + 200):
+            v = str(ws.cell(row=5, column=col).value or "").strip().lower()
+            if v in markers:
+                return col - 9
+        return default
 
     def _read_prev_month(self):
         if not self.prev_month_path or not os.path.exists(self.prev_month_path):
@@ -956,8 +1024,6 @@ class RosterScheduler:
             date_cols, calls_col, cum_pts_col, cum_months_col = [], None, None, None
             for col in range(7, 200):
                 v = prev_ws.cell(row=5, column=col).value
-                if v is None:
-                    break
                 vs = str(v).strip().lower()
                 if _parse_date(str(v)):
                     date_cols.append(col)
@@ -1050,7 +1116,7 @@ class MORosterScheduler(RosterScheduler):
 
     def _apply_staff_rules_impl(self, model, sv, N):
         cfg    = self.cfg
-        mo_sh  = self._sc_names("main", "weekend_extra", "cicu")
+        mo_sh  = self._call_count
         wr_sh  = self._sc_names("wr")
         sb_sh  = self._sc_names("sb")
         all_sh = self._all_shifts
@@ -1110,7 +1176,7 @@ class MORosterScheduler(RosterScheduler):
     def _setup_fairness_impl(self, model, sv, N) -> list:
         pool   = self.cfg["fairness_pools"][0]
         w      = pool["metrics"]
-        mo_sh  = self._sc_names("main", "weekend_extra", "cicu")
+        mo_sh  = self._call_count
         wr_sh  = self._sc_names("wr")
         sb_sh  = self._sc_names("sb")
         excl_t = pool["exclude_subtypes"]
@@ -1142,7 +1208,7 @@ class MORosterScheduler(RosterScheduler):
 
     def _display_statistics(self, _df, solver, sv):
         print("\n=== Statistics ===")
-        mo_sh  = self._sc_names("main", "weekend_extra", "cicu")
+        mo_sh  = self._call_count
         wr_sh  = self._sc_names("wr")
         sb_sh  = self._sc_names("sb")
         pool   = self.cfg["fairness_pools"][0]
@@ -1254,7 +1320,8 @@ class HORosterScheduler(RosterScheduler):
 
             wr_v.append(self._make_count_var(model, sv, s, self.dates, wr_sh, 5, f"wrcnt_ho{s}"))
             sb_v.append(self._make_count_var(model, sv, s, self.dates, sb_sh, 5, f"sbcnt_ho{s}"))
-            fc_v.append(self._make_count_var(model, sv, s, self.dates, ho_sh + ho6, 20, f"fccnt_ho{s}"))
+            fc_v.append(self._make_count_var(model, sv, s, self.dates,
+                self._call_count, 20, f"fccnt_ho{s}"))
 
             gw = model.NewIntVar(0, len(gw_triplets)+1, f"gw{s}")
             gw_bools = []
@@ -1267,15 +1334,11 @@ class HORosterScheduler(RosterScheduler):
             model.Add(gw == sum(gw_bools))
             gw_v.append(gw)
 
-            has = [model.NewBoolVar(f"hs{s}_{i}") for i in range(len(self.dates))]
-            for i, d in enumerate(self.dates):
-                tot = sum(sv[(s,d,sh)] for sh in all_sh)
-                model.Add(tot >= 1).OnlyEnforceIf(has[i])
-                model.Add(tot == 0).OnlyEnforceIf(has[i].Not())
+            day_worked = [sum(sv[(s,d,sh)] for sh in all_sh) for d in self.dates]
             excess = []
             for i in range(len(self.dates)-4):
                 ex = model.NewIntVar(0, 5, f"ex{s}_{i}")
-                model.Add(sum(has[i:i+5]) - 2 <= ex)
+                model.Add(sum(day_worked[i:i+5]) - 2 <= ex)
                 excess.append(ex)
             tot_ex = model.NewIntVar(0, 500, f"totex{s}")
             model.Add(tot_ex == sum(excess))
@@ -1393,9 +1456,7 @@ class REGRosterScheduler(RosterScheduler):
 
     def _setup_fairness_impl(self, model, sv, N) -> list:
         wr_sh   = self._sc_names("wr")
-        full_sh = self._sc_names("main", "cicu")
-        r3_sh   = self._sc_names("hybrid_shift")
-        pts_sh  = full_sh + r3_sh
+        pts_sh  = self._call_count
         terms   = []
 
         for pi, pool in enumerate(self.cfg["fairness_pools"]):
@@ -1428,7 +1489,7 @@ class REGRosterScheduler(RosterScheduler):
     def _display_statistics(self, _df, solver, sv):
         print("\n=== Statistics ===")
         wr_sh  = self._sc_names("wr")
-        pts_sh = self._sc_names("main", "cicu", "hybrid_shift")
+        pts_sh = self._call_count
         scale  = self.cfg.get("call_points_scale", 2)
 
         for pool in self.cfg["fairness_pools"]:
@@ -1486,7 +1547,16 @@ if __name__ == "__main__":
     prev    = _ask("Previous month xlsx (Enter to skip)", "") if tpl else ""
 
     year = int(_ask("Year", "e.g. 2026"))
-    phs  = get_singapore_ph(year)
+    try:
+        phs = get_singapore_ph(year)
+    except ValueError as e:
+        print(f"  {e}\n  Trying data.gov.sg…")
+        phs = fetch_singapore_ph(year)
+        if not phs:
+            manual = _ask("Enter PHs manually (D-Mon-YY comma-sep, Enter for none)", "")
+            phs = [h.strip() for h in manual.split(",") if h.strip()]
+            if not phs:
+                print("  WARNING: proceeding with NO public holidays")
     print(f"Public holidays {year}: {', '.join(phs)}")
     if _ask("Refresh from data.gov.sg? (y/n)").lower() == "y":
         fetched = fetch_singapore_ph(year)
@@ -1511,5 +1581,6 @@ if __name__ == "__main__":
 
     s = build_scheduler(rt, csv_p, out_dir, cfg, tpl or None, prev or None)
     s.set_public_holidays(phs)
+    s.set_base_year(year)
     s.load_data()
     s.solve_and_export()

@@ -307,6 +307,7 @@ with tab_run:
                             copy.deepcopy(cfg), tpl_path, prev_path,
                         )
                         scheduler.set_public_holidays(final_phs)
+                        scheduler.set_base_year(year)
                         scheduler.load_data()
                         df = scheduler.solve_and_export(
                             time_limit=float(time_limit),
