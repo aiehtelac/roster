@@ -504,6 +504,14 @@ class RosterScheduler:
         self.staff_data = pd.read_csv(self.csv_path, header=1)
         self.staff_data.columns = [str(c).strip() for c in self.staff_data.columns]
 
+        n_before = len(self.staff_data)
+        self.staff_data = self.staff_data[
+            self.staff_data["Name"].notna() & (self.staff_data["Name"].astype(str).str.strip() != "")
+        ].reset_index(drop=True)
+        if n_before != len(self.staff_data):
+            print(f"Dropped {n_before - len(self.staff_data)} blank rows "
+                  f"({len(self.staff_data)} staff remain)")
+
         missing = [c for c in cfg["required_cols"] if c not in self.staff_data.columns]
         if missing:
             raise ValueError(f"Missing CSV columns: {missing}")
