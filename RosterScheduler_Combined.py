@@ -583,6 +583,8 @@ class RosterScheduler:
                 shift in sc.get("sb",  {}).get("names", [])):
             return 0
         dt = self._day_type(dc)
+        if dt == "weekday" and dc in self.pre_phs and "pre_ph" in cfg["call_points"]:
+            dt = "pre_ph"
         if shift == self._hybrid_shift_name and "r3_points" in cfg:
             return cfg["r3_points"].get(dt, cfg["r3_points"].get("weekday", 0))
         if shift in sc.get("half", {}).get("names", []):
