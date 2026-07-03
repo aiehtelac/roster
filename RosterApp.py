@@ -48,6 +48,7 @@ tab_ph, tab_cfg, tab_run = st.tabs(["Public Holidays", "Config", "Run"])
 
 with tab_ph:
     st.subheader("Singapore Public Holidays")
+    st.text("Please check the dates for the pertinent months. In particular, off-in-lieus may not be included.")
 
     year = int(st.number_input("Year", min_value=2024, max_value=2030,
                                value=2026, step=1))
