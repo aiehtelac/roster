@@ -149,7 +149,7 @@ This is why auth is step 1 rather than last.
 
 - `load_data` reads `pd.read_csv(csv_path, header=1)` — **headers on row 2**
   ([RosterScheduler_Combined.py:504](RosterScheduler_Combined.py#L504))
-- `date_col_start`: HO 6, MO 4, REG 5. Columns before it are metadata
+- `date_col_start`: MO 6, HO 4, REG 5. Columns before it are metadata
   (`Name`, `Team`, `Ward`, `Subspec`, `EligibleShifts`, `SpecialReq` varying by type), everything
   after is the date grid ([:97-200](RosterScheduler_Combined.py#L97-L200))
 - `build_scheduler(roster_type, csv_path, output_dir, config, template_path, prev_month_path)` is

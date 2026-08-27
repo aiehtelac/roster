@@ -4,6 +4,8 @@ import copy
 import os
 import tempfile
 
+import pandas as pd
+import requests
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -12,6 +14,7 @@ from RosterScheduler_Combined import (
     ROSTER_CONFIGS,
     get_singapore_ph,
     fetch_singapore_ph,
+    _parse_date,
 )
 
 st.set_page_config(page_title="Roster Scheduler", layout="wide")
@@ -28,13 +31,60 @@ def find_template(roster_type):
             return path
     return None
 
+# ── Google Sheets ─────────────────────────────────────────────────────────────
+
+def sheet_config(roster_type):
+    """{spreadsheet_id, tabs: {name: gid}} for this roster, from st.secrets."""
+    try:
+        return dict(st.secrets["sheets"][roster_type])
+    except Exception:
+        return {}
+
+
+def fetch_sheet_csv(spreadsheet_id, gid):
+    url = (f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+           f"/export?format=csv&gid={gid}")
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    # A sheet that isn't link-viewable returns a sign-in page with status 200.
+    if resp.content.lstrip()[:1] == b"<":
+        raise ValueError("Sheet is not publicly viewable — Google returned a login page.")
+    return resp.content
+
+
+def preview_data(csv_bytes, roster_type):
+    """Mirror what load_data does, so the preview matches what the solver sees."""
+    cfg = ROSTER_CONFIGS[roster_type]
+    df  = pd.read_csv(io.BytesIO(csv_bytes), header=1)
+    df.columns = [str(c).strip() for c in df.columns]
+
+    staff = df
+    if "Name" in df.columns:
+        staff = df[df["Name"].notna() & (df["Name"].astype(str).str.strip() != "")]
+
+    missing = [c for c in cfg["required_cols"] if c not in df.columns]
+    # Same rule the scheduler uses: date columns are those past the metadata
+    # columns whose header parses as a date. Anything else it warns about and skips.
+    dates = [c for c in df.columns[cfg["date_col_start"]:] if _parse_date(c)]
+    return staff, missing, dates
+
 # ── Session state ─────────────────────────────────────────────────────────────
 
 for _k, _v in [("result_xlsx_bytes", None), ("result_xlsx_name", None),
                ("result_csv_bytes", None),  ("result_csv_name", None),
-               ("solve_log", None), ("error", None)]:
+               ("solve_log", None), ("error", None),
+               ("csv_bytes", None), ("csv_source", None),
+               ("csv_roster", None), ("csv_confirmed", False)]:
     if _k not in st.session_state:
         st.session_state[_k] = _v
+
+
+def stage_csv(data, source, roster_type):
+    """Hold newly loaded staff data, pending confirmation."""
+    st.session_state.csv_bytes     = data
+    st.session_state.csv_source    = source
+    st.session_state.csv_roster    = roster_type
+    st.session_state.csv_confirmed = False
 
 # ── Sidebar: roster type & file uploads ──────────────────────────────────────
 
@@ -42,8 +92,31 @@ with st.sidebar:
     st.header("Setup")
     roster_type = st.radio("Roster type", ["HO", "MO", "REG"], horizontal=True)
 
+    # Switching roster type invalidates whatever was loaded for the previous one.
+    if st.session_state.csv_roster not in (None, roster_type):
+        stage_csv(None, None, None)
+
+    st.subheader("Staff data")
+    sheet = sheet_config(roster_type)
+    tabs  = dict(sheet.get("tabs", {}))
+
+    if tabs:
+        tab_name = st.selectbox("Month tab", list(tabs))
+        if st.button("Pull from Google Sheet", type="primary"):
+            try:
+                with st.spinner("Pulling…"):
+                    data = fetch_sheet_csv(sheet["spreadsheet_id"], tabs[tab_name])
+                stage_csv(data, f"{roster_type} sheet — {tab_name}", roster_type)
+            except Exception as exc:
+                st.error(f"Pull failed: {exc}")
+    else:
+        st.caption(f"No sheet configured for {roster_type} in secrets.")
+
+    csv_file = st.file_uploader("…or upload a CSV", type="csv")
+    if csv_file is not None and csv_file.getvalue() != st.session_state.csv_bytes:
+        stage_csv(csv_file.getvalue(), f"Upload — {csv_file.name}", roster_type)
+
     st.subheader("Files")
-    csv_file  = st.file_uploader("Staff CSV *", type="csv")
     prev_file = st.file_uploader("Previous month xlsx", type=["xlsx", "xlsm"])
 
     tpl_path = find_template(roster_type)
@@ -280,12 +353,45 @@ with tab_cfg:
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 with tab_run:
+    st.subheader("Check staff data")
+
+    if st.session_state.csv_bytes is None:
+        st.info("Pull from the Google Sheet, or upload a CSV, in the sidebar.")
+    else:
+        try:
+            staff, missing, dates = preview_data(st.session_state.csv_bytes, roster_type)
+        except Exception as exc:
+            st.error(f"Could not read that data: {exc}")
+        else:
+            st.caption(st.session_state.csv_source)
+            m = st.columns(3)
+            m[0].metric("Staff", len(staff))
+            m[1].metric("Days", len(dates))
+            m[2].metric("Roster", roster_type)
+            if dates:
+                st.caption(f"Dates: {dates[0]} → {dates[-1]}")
+
+            if missing:
+                st.error(f"Missing required columns for {roster_type}: {', '.join(missing)}")
+            if not dates:
+                st.error("No date columns found — is this the right tab and roster type?")
+            st.dataframe(staff.head(10), width="stretch")
+
+            if st.session_state.csv_confirmed:
+                st.success("Confirmed — ready to generate.")
+            elif st.button("Use this data", type="primary",
+                           disabled=bool(missing) or not dates):
+                st.session_state.csv_confirmed = True
+                st.rerun()
+
+    st.divider()
     st.subheader("Generate Roster")
 
-    if not csv_file:
-        st.info("Upload a staff CSV in the sidebar to continue.")
+    ready = st.session_state.csv_confirmed
+    if not ready and st.session_state.csv_bytes is not None:
+        st.info("Confirm the data above to continue.")
 
-    if st.button("Generate Roster", disabled=not csv_file, type="primary"):
+    if st.button("Generate Roster", disabled=not ready, type="primary"):
         st.session_state.result_xlsx_bytes = None
         st.session_state.result_xlsx_name  = None
         st.session_state.result_csv_bytes  = None
@@ -302,7 +408,7 @@ with tab_run:
 
                     csv_path = os.path.join(tmpdir, "input.csv")
                     with open(csv_path, "wb") as f:
-                        f.write(csv_file.getvalue())
+                        f.write(st.session_state.csv_bytes)
 
                     prev_path = None
                     if prev_file and tpl_path:
