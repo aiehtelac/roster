@@ -115,9 +115,10 @@ with tab_import:
     tabs  = dict(sheet.get("tabs", {}))
 
     if tabs:
-        cols = st.columns([2, 1])
+        cols = st.columns([2, 1], vertical_alignment="bottom")
         tab_name = cols[0].selectbox("Month tab", list(tabs))
-        if cols[1].button("Pull from Google Sheet", type="primary"):
+        if cols[1].button("Pull from Google Sheet", type="primary",
+                          width="stretch"):
             try:
                 with st.spinner("Pulling…"):
                     data = fetch_sheet_csv(sheet["spreadsheet_id"], tabs[tab_name])
@@ -212,7 +213,6 @@ with tab_ph:
     st.session_state[ph_key] = ph_text
 
     final_phs = [h.strip() for h in ph_text.splitlines() if h.strip()]
-    st.caption(f"{len(final_phs)} PHs active")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
