@@ -2,11 +2,12 @@
 
 One formatted workbook per roster type, resolved automatically by roster type:
 
-    templates/HO.xlsx
-    templates/MO.xlsx
-    templates/REG.xlsx
+    templates/Templates_HO.xlsx
+    templates/Templates_MO.xlsx
+    templates/Templates_REG.xlsx
 
-`.xlsm` is accepted too (`HO.xlsm`); `.xlsx` wins if both exist.
+Names are matched exactly, so the roster suffix must be upper case.
+`.xlsm` is accepted too (`Templates_HO.xlsm`); `.xlsx` wins if both exist.
 
 The same template is reused every month — the scheduler copies it, then writes the
 month name into `B1`, the start date into `I5`, PH markers into row 1, and the roster

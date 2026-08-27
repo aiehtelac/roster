@@ -23,7 +23,7 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 def find_template(roster_type):
     """Path to the committed Excel template for this roster type, or None."""
     for ext in ("xlsx", "xlsm"):
-        path = os.path.join(TEMPLATE_DIR, f"{roster_type}.{ext}")
+        path = os.path.join(TEMPLATE_DIR, f"Templates_{roster_type}.{ext}")
         if os.path.exists(path):
             return path
     return None
@@ -51,7 +51,7 @@ with st.sidebar:
         st.caption(f"Excel template: `templates/{os.path.basename(tpl_path)}`")
     else:
         st.warning(
-            f"No `templates/{roster_type}.xlsx` in the repo — "
+            f"No `templates/Templates_{roster_type}.xlsx` in the repo — "
             "output will be CSV only."
         )
 
