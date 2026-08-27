@@ -3,6 +3,7 @@ import io
 import copy
 import os
 import tempfile
+from datetime import datetime
 
 import pandas as pd
 import requests
@@ -86,10 +87,18 @@ def stage_csv(data, source, roster_type):
     st.session_state.csv_roster    = roster_type
     st.session_state.csv_confirmed = False
 
-# ── Sidebar: roster type & file uploads ──────────────────────────────────────
+def fmt_date(dt):
+    return f"{dt.day} {dt:%b %Y}"
 
-with st.sidebar:
-    st.header("Setup")
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+
+tab_import, tab_ph, tab_cfg, tab_run = st.tabs(
+    ["1 · Import data", "2 · Public Holidays", "3 · Config", "4 · Run"]
+)
+
+# ── 1 · Import data ───────────────────────────────────────────────────────────
+
+with tab_import:
     roster_type = st.radio("Roster type", ["HO", "MO", "REG"], horizontal=True)
 
     # Switching roster type invalidates whatever was loaded for the previous one.
@@ -101,8 +110,9 @@ with st.sidebar:
     tabs  = dict(sheet.get("tabs", {}))
 
     if tabs:
-        tab_name = st.selectbox("Month tab", list(tabs))
-        if st.button("Pull from Google Sheet", type="primary"):
+        cols = st.columns([2, 1])
+        tab_name = cols[0].selectbox("Month tab", list(tabs))
+        if cols[1].button("Pull from Google Sheet", type="primary"):
             try:
                 with st.spinner("Pulling…"):
                     data = fetch_sheet_csv(sheet["spreadsheet_id"], tabs[tab_name])
@@ -116,30 +126,67 @@ with st.sidebar:
     if csv_file is not None and csv_file.getvalue() != st.session_state.csv_bytes:
         stage_csv(csv_file.getvalue(), f"Upload — {csv_file.name}", roster_type)
 
-    st.subheader("Files")
-    prev_file = st.file_uploader("Previous month xlsx", type=["xlsx", "xlsm"])
+    st.subheader("Previous month")
+    prev_file = st.file_uploader(
+        "Previous month xlsx", type=["xlsx", "xlsm"],
+        help="Carries cumulative call points and months forward. Optional.",
+    )
 
+    st.subheader("Template")
     tpl_path = find_template(roster_type)
     if tpl_path:
-        st.caption(f"Excel template: `templates/{os.path.basename(tpl_path)}`")
+        st.caption(f"`templates/{os.path.basename(tpl_path)}`")
     else:
         st.warning(
             f"No `templates/Templates_{roster_type}.xlsx` in the repo — "
             "output will be CSV only."
         )
 
-# ── Tabs ──────────────────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Check data")
 
-tab_ph, tab_cfg, tab_run = st.tabs(["Public Holidays", "Config", "Run"])
+    span = None   # (first, last) datetimes of the imported month
 
-# ── Public Holidays ───────────────────────────────────────────────────────────
+    if st.session_state.csv_bytes is None:
+        st.info("Pull from the Google Sheet, or upload a CSV, above.")
+    else:
+        try:
+            staff, missing, dates = preview_data(st.session_state.csv_bytes, roster_type)
+        except Exception as exc:
+            st.error(f"Could not read that data: {exc}")
+        else:
+            parsed = [_parse_date(d) for d in dates]
+            if parsed:
+                span = (parsed[0], parsed[-1])
+
+            st.caption(st.session_state.csv_source)
+            m = st.columns(3)
+            m[0].metric("Roster", roster_type)
+            m[1].metric("Staff", len(staff))
+            m[2].metric("Dates", f"{fmt_date(span[0])} – {fmt_date(span[1])}" if span else "—")
+
+            if missing:
+                st.error(f"Missing required columns for {roster_type}: {', '.join(missing)}")
+            if not dates:
+                st.error("No date columns found — is this the right tab and roster type?")
+            st.dataframe(staff.head(10), width="stretch")
+
+            if st.session_state.csv_confirmed:
+                st.success("Confirmed — go to Public Holidays.")
+            elif st.button("Use this data", type="primary",
+                           disabled=bool(missing) or not dates):
+                st.session_state.csv_confirmed = True
+                st.rerun()
+
+# ── 2 · Public Holidays ───────────────────────────────────────────────────────
 
 with tab_ph:
     st.subheader("Singapore Public Holidays")
     st.text("Please check the dates for the pertinent months. In particular, off-in-lieus may not be included.")
 
-    year = int(st.number_input("Year", min_value=2024, max_value=2030,
-                               value=2026, step=1))
+    year = span[0].year if span else datetime.today().year
+    st.caption(f"Year {year}, taken from the imported dates."
+               if span else f"No data imported yet — showing {year}.")
 
     ph_key = f"ph_text_{year}"
     if ph_key not in st.session_state:
@@ -353,43 +400,11 @@ with tab_cfg:
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 with tab_run:
-    st.subheader("Check staff data")
-
-    if st.session_state.csv_bytes is None:
-        st.info("Pull from the Google Sheet, or upload a CSV, in the sidebar.")
-    else:
-        try:
-            staff, missing, dates = preview_data(st.session_state.csv_bytes, roster_type)
-        except Exception as exc:
-            st.error(f"Could not read that data: {exc}")
-        else:
-            st.caption(st.session_state.csv_source)
-            m = st.columns(3)
-            m[0].metric("Staff", len(staff))
-            m[1].metric("Days", len(dates))
-            m[2].metric("Roster", roster_type)
-            if dates:
-                st.caption(f"Dates: {dates[0]} → {dates[-1]}")
-
-            if missing:
-                st.error(f"Missing required columns for {roster_type}: {', '.join(missing)}")
-            if not dates:
-                st.error("No date columns found — is this the right tab and roster type?")
-            st.dataframe(staff.head(10), width="stretch")
-
-            if st.session_state.csv_confirmed:
-                st.success("Confirmed — ready to generate.")
-            elif st.button("Use this data", type="primary",
-                           disabled=bool(missing) or not dates):
-                st.session_state.csv_confirmed = True
-                st.rerun()
-
-    st.divider()
     st.subheader("Generate Roster")
 
     ready = st.session_state.csv_confirmed
-    if not ready and st.session_state.csv_bytes is not None:
-        st.info("Confirm the data above to continue.")
+    if not ready:
+        st.info("Import and confirm staff data on the Import data tab first.")
 
     if st.button("Generate Roster", disabled=not ready, type="primary"):
         st.session_state.result_xlsx_bytes = None
@@ -485,3 +500,15 @@ with tab_run:
     if st.session_state.solve_log:
         with st.expander("Solver log"):
             st.text(st.session_state.solve_log)
+
+# ── Sidebar: status ───────────────────────────────────────────────────────────
+# Read-only. Written last so it can report values the tabs above produced.
+
+with st.sidebar:
+    st.header("Status")
+    st.markdown(f"**Roster** · {roster_type}")
+    st.markdown(f"**Month** · {fmt_date(span[0])} – {fmt_date(span[1])}" if span
+                else "**Month** · not imported")
+    st.markdown(f"**Template** · {'found' if tpl_path else 'missing'}")
+    st.markdown(f"**Holidays** · {len(final_phs)} in {year}")
+    st.markdown(f"**Data** · {'confirmed' if st.session_state.csv_confirmed else 'not confirmed'}")
