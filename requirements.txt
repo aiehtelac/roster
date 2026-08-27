@@ -2,3 +2,6 @@ streamlit
 pandas
 ortools
 openpyxl
+streamlit-authenticator==0.4.2
+gspread
+google-auth

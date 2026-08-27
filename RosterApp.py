@@ -17,6 +17,17 @@ from RosterScheduler_Combined import (
 st.set_page_config(page_title="Roster Scheduler", layout="wide")
 st.title("Roster Scheduler")
 
+TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
+
+
+def find_template(roster_type):
+    """Path to the committed Excel template for this roster type, or None."""
+    for ext in ("xlsx", "xlsm"):
+        path = os.path.join(TEMPLATE_DIR, f"{roster_type}.{ext}")
+        if os.path.exists(path):
+            return path
+    return None
+
 # ── Session state ─────────────────────────────────────────────────────────────
 
 for _k, _v in [("result_xlsx_bytes", None), ("result_xlsx_name", None),
@@ -33,12 +44,16 @@ with st.sidebar:
 
     st.subheader("Files")
     csv_file  = st.file_uploader("Staff CSV *", type="csv")
-    tpl_file  = st.file_uploader("Excel template", type=["xlsx", "xlsm"])
-    prev_file = st.file_uploader(
-        "Previous month xlsx", type=["xlsx", "xlsm"],
-        disabled=tpl_file is None,
-        help="Only used when a template is provided",
-    )
+    prev_file = st.file_uploader("Previous month xlsx", type=["xlsx", "xlsm"])
+
+    tpl_path = find_template(roster_type)
+    if tpl_path:
+        st.caption(f"Excel template: `templates/{os.path.basename(tpl_path)}`")
+    else:
+        st.warning(
+            f"No `templates/{roster_type}.xlsx` in the repo — "
+            "output will be CSV only."
+        )
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
@@ -289,14 +304,8 @@ with tab_run:
                     with open(csv_path, "wb") as f:
                         f.write(csv_file.getvalue())
 
-                    tpl_path = None
-                    if tpl_file:
-                        tpl_path = os.path.join(tmpdir, "template.xlsx")
-                        with open(tpl_path, "wb") as f:
-                            f.write(tpl_file.getvalue())
-
                     prev_path = None
-                    if prev_file and tpl_file:
+                    if prev_file and tpl_path:
                         prev_path = os.path.join(tmpdir, "prev.xlsx")
                         with open(prev_path, "wb") as f:
                             f.write(prev_file.getvalue())
@@ -324,7 +333,7 @@ with tab_run:
                             "Check the log — likely infeasible constraints or too few staff."
                         )
                     else:
-                        skip = {"template.xlsx", "prev.xlsx", "input.csv"}
+                        skip = {"prev.xlsx", "input.csv"}
 
                         for fname in sorted(os.listdir(tmpdir)):
                             if fname in skip:
