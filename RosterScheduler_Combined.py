@@ -121,6 +121,7 @@ ROSTER_CONFIGS = {
         },
         "call_points_scale": 2,
         "ho6_points": 2,   # flat 1.0pt stored ×2
+        "spacing_window": 7,   # gaps shorter than this are penalised (see shift_spacing)
         "soft_penalties": {"BLOCK":50,"REQUEST":50,"NEW":10},
         "hard_blocks":    ["POSTCALL","LEAVE","AUTOBLOCK"],
         "leave_values":   ["LEAVE"],
@@ -1310,6 +1311,8 @@ class HORosterScheduler(RosterScheduler):
         ]
         print(f"HO golden weekend triplets: {len(gw_triplets)}")
 
+        spacing_win = cfg.get("spacing_window", 7)
+
         cross_month_w = w.get("cross_month", 0)
         global_avg    = 0.0
         if cross_month_w and self.prev_month_data:
@@ -1351,13 +1354,17 @@ class HORosterScheduler(RosterScheduler):
             model.Add(gw == sum(gw_bools))
             gw_v.append(gw)
 
+            # Spacing: charge 1 for every shift beyond the first in each rolling
+            # `spacing_window`. Two shifts g days apart fall inside (window - g)
+            # such windows, so the cost grades itself — with window 7 a 3-day gap
+            # costs 4, a 4-day 3, a 5-day 2, a 6-day 1, and 7+ days is free.
             day_worked = [sum(sv[(s,d,sh)] for sh in all_sh) for d in self.dates]
             excess = []
-            for i in range(len(self.dates)-4):
-                ex = model.NewIntVar(0, 5, f"ex{s}_{i}")
-                model.Add(sum(day_worked[i:i+5]) - 1 <= ex)
+            for i in range(len(self.dates) - spacing_win + 1):
+                ex = model.NewIntVar(0, spacing_win, f"ex{s}_{i}")
+                model.Add(sum(day_worked[i:i+spacing_win]) - 1 <= ex)
                 excess.append(ex)
-            tot_ex = model.NewIntVar(0, 500, f"totex{s}")
+            tot_ex = model.NewIntVar(0, 1000, f"totex{s}")
             model.Add(tot_ex == sum(excess))
             gap_v.append(tot_ex)
 
@@ -1373,8 +1380,15 @@ class HORosterScheduler(RosterScheduler):
                     dev_v.append(dev)
 
         vmap  = {"pts":(pts_v,1000),"full_calls":(fc_v,20),"wr_count":(wr_v,5),"sb_count":(sb_v,5),
-                 "golden_wknds":(gw_v,len(gw_triplets)+1),"shift_spacing":(gap_v,500)}
+                 "golden_wknds":(gw_v,len(gw_triplets)+1)}
         terms = self._build_fairness_terms(model, vmap, w, "ho")
+
+        # Spacing is summed, not min-max'd: we want every gap pushed outward,
+        # not just the worst-off staff member's.
+        spacing_w = w.get("shift_spacing", 0)
+        if spacing_w and gap_v:
+            terms.append(sum(gap_v) * spacing_w)
+            print(f"  Spacing: {spacing_win}-day window, weight {spacing_w}")
 
         if dev_v:
             terms.append(sum(dev_v) * cross_month_w)

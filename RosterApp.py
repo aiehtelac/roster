@@ -373,7 +373,8 @@ with tab_cfg:
         "wr_count":      "Number of WR shifts",
         "sb_count":      "Number of SB shifts",
         "golden_wknds":  "Fri–Sat–Sun triplets completely free",
-        "shift_spacing": "Penalises > 2 calls in any 5-day window",
+        "shift_spacing": "Spreads a person's calls apart: cost for 3-day gap 4, 5-day 2, "
+                         "6-day 1, 7+ free. 0 disables",
         "cross_month":   "Deviation from running call-point average across months",
     }
     st.subheader("Fairness Weights")
