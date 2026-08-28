@@ -17,7 +17,7 @@ Usage:
     df = s.solve_and_export()
 """
 
-import os, copy, shutil
+import os, io, copy, shutil
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -120,7 +120,7 @@ ROSTER_CONFIGS = {
             "saturday":5,"ph":5,"sunday":4,"friday":3,"pre_ph":3,"weekday":2,
         },
         "call_points_scale": 2,
-        "ho6_points": 2,   # flat 1.0pt stored ×2
+        "ho6_points": 1,   # flat 0.5, stored ×2
         "spacing_window": 7,   # gaps shorter than this are penalised (see shift_spacing)
         "soft_penalties": {"BLOCK":50,"REQUEST":50,"NEW":10},
         "hard_blocks":    ["POSTCALL","LEAVE","AUTOBLOCK"],
