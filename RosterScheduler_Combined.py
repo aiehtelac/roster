@@ -1355,7 +1355,7 @@ class HORosterScheduler(RosterScheduler):
             excess = []
             for i in range(len(self.dates)-4):
                 ex = model.NewIntVar(0, 5, f"ex{s}_{i}")
-                model.Add(sum(day_worked[i:i+5]) - 2 <= ex)
+                model.Add(sum(day_worked[i:i+5]) - 1 <= ex)
                 excess.append(ex)
             tot_ex = model.NewIntVar(0, 500, f"totex{s}")
             model.Add(tot_ex == sum(excess))
