@@ -508,6 +508,11 @@ class RosterScheduler:
         """Columns to sort staff by before solving. Override in subclasses."""
         return ["Team", "Ward", "Name"]
 
+    def _sort_staff(self, df):
+        """Row order for solving and for the Excel export. Override in subclasses."""
+        keys = [k for k in self._staff_sort_keys() if k in df.columns]
+        return df.sort_values(keys).reset_index(drop=True) if keys else df
+
     def load_data(self):
         cfg = self.cfg
         self.staff_data = pd.read_csv(self.csv_path, header=1)
@@ -525,9 +530,7 @@ class RosterScheduler:
         if missing:
             raise ValueError(f"Missing CSV columns: {missing}")
 
-        sort_keys = [k for k in self._staff_sort_keys() if k in self.staff_data.columns]
-        if sort_keys:
-            self.staff_data = self.staff_data.sort_values(sort_keys).reset_index(drop=True)
+        self.staff_data = self._sort_staff(self.staff_data)
 
         start = cfg["date_col_start"]
         if len(self.staff_data.columns) <= start:
@@ -1451,8 +1454,15 @@ class HORosterScheduler(RosterScheduler):
 
 class REGRosterScheduler(RosterScheduler):
 
-    def _staff_sort_keys(self) -> list[str]:
-        return ["StaffType", "Name"]
+    _TYPE_ORDER = {"SR": 0, "RP": 1, "AC": 2}
+
+    def _sort_staff(self, df):
+        """Registrars first, then RPs, then ACs; by name within each."""
+        rank = df.apply(lambda r: self._TYPE_ORDER.get(self._stype(r), 99), axis=1)
+        return (df.assign(_rank=rank)
+                  .sort_values(["_rank", "Name"], kind="stable")
+                  .drop(columns="_rank")
+                  .reset_index(drop=True))
 
     def _stype(self, staff) -> str:
         raw = str(staff.get("StaffType","")).strip().upper()
