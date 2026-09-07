@@ -46,7 +46,8 @@ _MONTH_MAP = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
 #   cicu          — filled exactly once every day; gated via EligibleShifts
 #   hybrid_shift  — filled exactly once every day; weekday half-call, weekend full call (when names non-empty)
 #   wr            — named slots filled in order up to slots[day_type];
-#                   ph_after_sunday overrides slots["ph"] when PH follows Sunday
+#                   ph_after_sunday overrides slots["ph"] when PH follows Sunday;
+#                   extra_after_ac_call adds one more slot the day after an AC call
 #   sb            — total of named shifts == slots[day_type]
 #   half          — total of named shifts == slots[day_type]
 
@@ -154,11 +155,12 @@ ROSTER_CONFIGS = {
         "shift_categories": {
             "main":          {"names": ["R1","R2"]},
             "weekend_extra": {"names": []},
-            "cicu":          {"names": ["R4"]},
+            "cicu":          {"names": ["R-CICU"]},
             "hybrid_shift": {"names": ["R3"]},
             "wr":  {"names": ["WR1","WR2"],
-                    "slots": {"weekday":0,"saturday":2,"sunday":2,"ph":2},
-                    "ph_after_sunday": 2},
+                    "slots": {"weekday":0,"saturday":1,"sunday":0,"ph":1},
+                    "ph_after_sunday": 0,
+                    "extra_after_ac_call": True},
             "sb":  {"names": [],
                     "slots": {"weekday":0,"saturday":0,"sunday":0,"ph":0}},
             "half":{"names": [],
@@ -171,16 +173,16 @@ ROSTER_CONFIGS = {
             "saturday":8,"ph":6,"sunday":6,"friday":2,"weekday":1,
         },
         "call_points_scale": 2,
-        "soft_penalties": {"BLOCK":30,"REQUEST":30},
+        "soft_penalties": {"BLOCK":30,"REQUEST":30,"WRBLOCK":30},
         "hard_blocks":    ["POSTCALL","COURSE","SUBSPEC","CLINIC","AUTOBLOCK"],
         "leave_values":   ["LEAVE"],
-        "limits":         {"wr_max":2,"sb_max":0,"rp_r3_max":3,"ac_call_min":1,"ac_call_max":2},
-        "eligible_shifts_mode": "whitelist",
+        "limits":         {"wr_max":2,"sb_max":0,
+                           "rp_r3_min":1,"rp_r3_max":3,
+                           "rp_wr_max":2,"rp_wr_target":2,
+                           "ac_call_min":1,"ac_call_max":2},
+        "eligible_shifts_mode": "cicushift_only",
         "new_block_days": 0,
         "new_phantom_points": 0,
-        "vikas_days":     [],
-        "team_preferences": {},
-        "team_pref_penalty": 2,
         "fairness_pools": [
             {
                 "label": "SR Pool",
@@ -194,9 +196,15 @@ ROSTER_CONFIGS = {
                 "include_types":    ["RP"],
                 "exclude_subtypes": [],
                 "exclude_tags":     [],
-                "metrics": {"pts":20,"wr_count":2,"sat_calls":0},
+                "metrics": {"pts":20,"wr_count":2,"sat_calls":0,"wr_target":10},
             },
         ],
+        # StaffType as written in the sheet → the SR/RP/AC codes the rules use
+        "staff_type_aliases": {
+            "Registrar": "SR",
+            "Resident Physician": "RP",
+            "Associate Consultant": "AC",
+        },
         "required_cols": ["Name","StaffType","Subspec","EligibleShifts","SpecialReq"],
         "date_col_start": 5,
         "color_priority": ["LEAVE","POSTCALL","COURSE","SUBSPEC","AUTOBLOCK","REQUEST","BLOCK"],
@@ -604,6 +612,10 @@ class RosterScheduler:
             return wr.get("ph_after_sunday", base)
         return base
 
+    def _wr_extra_slot(self, model, sv, N, d: str):
+        """One conditional extra WR slot on date d, as a BoolVar. None = never."""
+        return None
+
     # ── Model building ────────────────────────────────────────────────────────
 
     def create_model(self):
@@ -663,10 +675,15 @@ class RosterScheduler:
             for sh in sc.get("cicu", {}).get("names", []):
                 model.Add(col_sum[(d, sh)] == 1)
 
-            # WR: named slots filled in order up to wr_slots count
+            # WR: named slots filled in order up to wr_slots count, plus one
+            # conditional slot immediately after it (see _wr_extra_slot)
             wr_slots = self._wr_slots(d)
+            extra    = self._wr_extra_slot(model, sv, N, d)
             for i, sh in enumerate(sc.get("wr", {}).get("names", [])):
-                model.Add(col_sum[(d, sh)] == (1 if i < wr_slots else 0))
+                if extra is not None and i == wr_slots:
+                    model.Add(col_sum[(d, sh)] == extra)
+                else:
+                    model.Add(col_sum[(d, sh)] == (1 if i < wr_slots else 0))
 
             # SB and half: total equals configured slot count
             for cat in ("sb", "half"):
@@ -743,6 +760,7 @@ class RosterScheduler:
         pen_cfg   = self.cfg["soft_penalties"]
         all_sh    = self._all_shifts
         main_sh   = self._call_count
+        wr_sh     = self._sc_names("wr")
         penalties = []
 
         for s, staff in self.staff_data.iterrows():
@@ -756,6 +774,10 @@ class RosterScheduler:
                     p = model.NewBoolVar(f"pr_{s}_{d}")
                     model.Add(sum(sv[(s,d,sh)] for sh in main_sh) + p >= 1)
                     penalties.append((p, w))
+                elif val == "WRBLOCK":
+                    # discourages a WR round only, not other calls that day
+                    if wr_sh:
+                        penalties.append((sum(sv[(s,d,sh)] for sh in wr_sh), w))
                 else:
                     # any shift triggers the penalty
                     penalties.append((sum(sv[(s,d,sh)] for sh in all_sh), w))
@@ -1433,7 +1455,8 @@ class REGRosterScheduler(RosterScheduler):
         return ["StaffType", "Name"]
 
     def _stype(self, staff) -> str:
-        return str(staff.get("StaffType","")).strip().upper()
+        raw = str(staff.get("StaffType","")).strip().upper()
+        return self.cfg.get("staff_type_aliases", {}).get(raw, raw)
 
     def _in_pool(self, staff, pool) -> bool:
         stype  = self._stype(staff)
@@ -1473,17 +1496,44 @@ class REGRosterScheduler(RosterScheduler):
                 model.Add(total <= lims.get("ac_call_max",2))
 
             elif stype == "RP":
+                # Weekdays: R3 only, and nothing at all on Fridays
                 if r3:
                     non_r3 = [sh for sh in all_sh if sh != r3]
                     for d in self.weekdays:
-                        self._block_shifts(model, sv, s, d, non_r3)
-                    model.Add(sum(sv[(s,d,r3)] for d in self.dates)
-                              <= lims.get("rp_r3_max",3))
+                        self._block_shifts(
+                            model, sv, s, d,
+                            all_sh if d in self.fridays else non_r3)
+                    r3_tot = sum(sv[(s,d,r3)] for d in self.dates)
+                    model.Add(r3_tot >= lims.get("rp_r3_min",2))
+                    model.Add(r3_tot <= lims.get("rp_r3_max",3))
+                # Weekends/PH: WR rounds only, capped (target is a soft term)
                 non_wr = [sh for sh in all_sh if sh not in wr_sh]
                 for d in wknd:
                     self._block_shifts(model, sv, s, d, non_wr)
+                model.Add(sum(sv[(s,d,sh)] for d in self.dates for sh in wr_sh)
+                          <= lims.get("rp_wr_max",2))
 
         print("REG staff rules applied")
+
+    def _wr_extra_slot(self, model, sv, N, d: str):
+        """An AC on call yesterday adds one WR slot (only weekend/PH days).
+        """
+        wr = self.cfg["shift_categories"].get("wr", {})
+        if not wr.get("extra_after_ac_call") or not self._is_wknd(d):
+            return None
+        i = self._date_idx[d]
+        if i == 0:                      # no previous day in this roster
+            return None
+        prev    = self.dates[i - 1]
+        ac_rows = [s for s, staff in self.staff_data.iterrows()
+                   if self._stype(staff) == "AC"]
+        if not ac_rows:
+            return None
+        on_call = sum(sv[(s, prev, sh)] for s in ac_rows for sh in self._all_shifts)
+        extra   = model.NewBoolVar(f"wr_extra_{i}")
+        model.Add(on_call >= 1).OnlyEnforceIf(extra)
+        model.Add(on_call == 0).OnlyEnforceIf(extra.Not())
+        return extra
 
     def _setup_fairness_impl(self, model, sv, N) -> list:
         wr_sh   = self._sc_names("wr")
@@ -1514,6 +1564,23 @@ class REGRosterScheduler(RosterScheduler):
             terms.extend(pool_terms)
             print(f"REG {pool['label']}: {len(pts_v)} staff, "
                   f"{len(pool_terms)} active metrics")
+
+            # RP weekend-round target: soft, because WR slots are scarce
+            w_tgt = w.get("wr_target", 0)
+            tgt   = self.cfg["limits"].get("rp_wr_target", 0)
+            if w_tgt and tgt and pool.get("include_types") == ["RP"]:
+                short = []
+                for s, staff in self.staff_data.iterrows():
+                    if self._stype(staff) != "RP": continue
+                    cnt = self._make_count_var(
+                        model, sv, s, self.dates, wr_sh, 5, f"wrtgt_cnt_{s}")
+                    gap = model.NewIntVar(0, tgt, f"wrtgt_short_{s}")
+                    model.Add(gap >= tgt - cnt)
+                    short.append(gap)
+                if short:
+                    terms.append(sum(short) * w_tgt)
+                    print(f"REG RP weekend-round target {tgt}: "
+                          f"{len(short)} RPs, weight {w_tgt}")
 
         return terms
 

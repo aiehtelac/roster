@@ -331,7 +331,10 @@ with tab_cfg:
     _LIM_HINTS = {
         "wr_max":      "Maximum WR shifts per person",
         "sb_max":      "Maximum SB shifts per person",
-        "rp_r3_max":   "Maximum R3 shifts for RPs",
+        "rp_r3_min":   "Minimum R3 shifts for RPs (Mon–Thu only)",
+        "rp_r3_max":   "Maximum R3 shifts for RPs (Mon–Thu only)",
+        "rp_wr_max":   "Maximum weekend WR rounds for RPs (hard cap)",
+        "rp_wr_target":"Weekend WR rounds each RP should get (soft — see wr_target weight)",
         "ac_call_min": "Minimum total calls for ACs",
         "ac_call_max": "Maximum total calls for ACs",
     }
@@ -371,6 +374,7 @@ with tab_cfg:
         "full_calls":    "Number of calls",
         "sat_calls":     "Number of Saturday calls",
         "wr_count":      "Number of WR shifts",
+        "wr_target":     "Penalty per weekend round an RP falls short of rp_wr_target. 0 disables",
         "sb_count":      "Number of SB shifts",
         "golden_wknds":  "Fri–Sat–Sun triplets completely free",
         "shift_spacing": "Spreads a person's calls apart: cost for 3-day gap 4, 5-day 2, "
