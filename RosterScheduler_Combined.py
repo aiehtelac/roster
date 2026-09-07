@@ -199,11 +199,11 @@ ROSTER_CONFIGS = {
                 "metrics": {"pts":20,"wr_count":2,"sat_calls":0,"wr_target":10},
             },
         ],
-        # StaffType as written in the sheet → the SR/RP/AC codes the rules use
+        # StaffType as written in the sheet → the SR/RP/AC codes the rules use.
         "staff_type_aliases": {
-            "Registrar": "SR",
-            "Resident Physician": "RP",
-            "Associate Consultant": "AC",
+            "REGISTRAR": "SR",
+            "RESIDENT PHYSICIAN": "RP",
+            "ASSOCIATE CONSULTANT": "AC",
         },
         "required_cols": ["Name","StaffType","Subspec","EligibleShifts","SpecialReq"],
         "date_col_start": 5,
