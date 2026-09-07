@@ -189,14 +189,14 @@ ROSTER_CONFIGS = {
                 "include_types":    ["SR"],
                 "exclude_subtypes": [],
                 "exclude_tags":     [],
-                "metrics": {"pts":20,"sat_calls":3,"wr_count":2,"full_calls":0,"golden_wknds":0},
+                "metrics": {"pts":40,"sat_calls":3,"wr_count":2,"full_calls":0,"golden_wknds":0},
             },
             {
                 "label": "RP Pool",
                 "include_types":    ["RP"],
                 "exclude_subtypes": [],
                 "exclude_tags":     [],
-                "metrics": {"pts":20,"wr_count":2,"sat_calls":0,"wr_target":10},
+                "metrics": {"pts":30,"wr_count":2,"sat_calls":0,"wr_target":10},
             },
         ],
         # StaffType as written in the sheet → the SR/RP/AC codes the rules use.
