@@ -179,7 +179,7 @@ ROSTER_CONFIGS = {
         "limits":         {"wr_max":2,"sb_max":0,
                            "rp_r3_min":1,"rp_r3_max":3,
                            "rp_wr_max":2,"rp_wr_target":2,
-                           "ac_call_min":1,"ac_call_max":2},
+                           "ac_callpoints_min":2,"ac_callpoints_max":3},
         "eligible_shifts_mode": "cicushift_only",
         "new_block_days": 0,
         "new_phantom_points": 0,
@@ -189,7 +189,7 @@ ROSTER_CONFIGS = {
                 "include_types":    ["SR"],
                 "exclude_subtypes": [],
                 "exclude_tags":     [],
-                "metrics": {"pts":40,"sat_calls":3,"wr_count":2,"full_calls":0,"golden_wknds":0},
+                "metrics": {"pts":40,"sat_calls":3,"wr_count":2,"full_calls":10,"golden_wknds":0, "shift_spacing":5},
             },
             {
                 "label": "RP Pool",
@@ -1077,9 +1077,6 @@ class RosterScheduler:
                         date_cols.append(col)
                         by_daymonth.setdefault((p[0], p[1]), col)
 
-            # The two calendar days before the new month, matched on day+month so
-            # trailing unused template dates are ignored and yearless headers can't
-            # be mis-yeared. Falls back to the rightmost date columns if absent.
             first_new = self._parse(self.dates[0]) if self.dates else None
             want  = [first_new - timedelta(days=n) for n in (2, 1)] if first_new else []
             last2 = [by_daymonth[(d.day, d.month)] for d in want
@@ -1516,9 +1513,10 @@ class REGRosterScheduler(RosterScheduler):
                     self._block_day(model, sv, s, d)
                 for d in self.dates:
                     self._block_shifts(model, sv, s, d, wr_sh)
-                total = sum(sv[(s,d,sh)] for d in self.dates for sh in all_sh)
-                model.Add(total >= lims.get("ac_call_min",1))
-                model.Add(total <= lims.get("ac_call_max",2))
+                pts = sum(sv[(s,d,sh)] * self._points_for(d, sh)
+                          for d in self.dates for sh in all_sh)
+                model.Add(pts >= lims.get("ac_callpoints_min",2))
+                model.Add(pts <= lims.get("ac_callpoints_max",3))
 
             elif stype == "RP":
                 # Weekdays: R3 only, and nothing at all on Fridays

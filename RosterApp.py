@@ -335,8 +335,8 @@ with tab_cfg:
         "rp_r3_max":   "Maximum R3 shifts for RPs (Mon–Thu only)",
         "rp_wr_max":   "Maximum weekend WR rounds for RPs (hard cap)",
         "rp_wr_target":"Weekend WR rounds each RP should get (soft — see wr_target weight)",
-        "ac_call_min": "Minimum total calls for ACs",
-        "ac_call_max": "Maximum total calls for ACs",
+        "ac_callpoints_min": "Minimum total call points for ACs (stored ×2, so 2 = 1.0)",
+        "ac_callpoints_max": "Maximum total call points for ACs (stored ×2, so 3 = 1.5)",
     }
     lim      = cfg["limits"]
     lim_cols = st.columns(min(len(lim), 4))
