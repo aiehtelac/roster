@@ -1061,19 +1061,34 @@ class RosterScheduler:
             prev_ws = prev_wb[sheets[0]]
 
             date_cols, calls_col, cum_pts_col, cum_months_col = [], None, None, None
-            for col in range(7, 200):
+            by_daymonth = {}
+            for col in range(9, 200):
                 v = prev_ws.cell(row=5, column=col).value
                 vs = str(v).strip().lower()
-                if _parse_date(str(v)):
-                    date_cols.append(col)
-                elif vs == "total # of calls":
+                if vs == "total # of calls":
                     calls_col = col
                 elif vs == "total call points":
                     cum_pts_col = col
                 elif vs == "total months":
                     cum_months_col = col
+                else:
+                    p = self._raw_date_parts(str(v))
+                    if p:
+                        date_cols.append(col)
+                        by_daymonth.setdefault((p[0], p[1]), col)
 
-            last2       = date_cols[-2:] if len(date_cols) >= 2 else date_cols
+            # The two calendar days before the new month, matched on day+month so
+            # trailing unused template dates are ignored and yearless headers can't
+            # be mis-yeared. Falls back to the rightmost date columns if absent.
+            first_new = self._parse(self.dates[0]) if self.dates else None
+            want  = [first_new - timedelta(days=n) for n in (2, 1)] if first_new else []
+            last2 = [by_daymonth[(d.day, d.month)] for d in want
+                     if (d.day, d.month) in by_daymonth]
+            if len(last2) < 2:
+                print(f"  Warning: prev month sheet missing "
+                      f"{[d.strftime('%d %b') for d in want]} — falling back to "
+                      f"rightmost date column(s)")
+                last2 = date_cols[-2:] if len(date_cols) >= 2 else date_cols
             self._prev_month_hdrs = [prev_ws.cell(row=5, column=lc).value for lc in last2]
             print(f"  Month-1: last date cols {last2}, calls col {calls_col}, "
                    f"cum_pts col {cum_pts_col}, "
