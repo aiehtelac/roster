@@ -353,18 +353,20 @@ with tab_cfg:
     # ── Soft Penalty Weights ──────────────────────────────────────────────────
     st.subheader("Soft Penalty Weights")
     pen      = cfg["soft_penalties"]
-    pen_cols = st.columns(len(pen) + 1)
+    has_team = bool(cfg.get("team_preferences"))
+    pen_cols = st.columns(len(pen) + (1 if has_team else 0))
     for i, (k, v) in enumerate(pen.items()):
         pen[k] = pen_cols[i].number_input(
             k, min_value=0, max_value=500, value=int(v),
             key=f"pen_{roster_type}_{k}",
         )
-    cfg["team_pref_penalty"] = pen_cols[len(pen)].number_input(
-        "Team pref", min_value=0, max_value=500,
-        value=int(cfg.get("team_pref_penalty", 2)),
-        help="Penalty per shift assigned outside a staff member's preferred team shift",
-        key=f"team_pref_{roster_type}",
-    )
+    if has_team:
+        cfg["team_pref_penalty"] = pen_cols[len(pen)].number_input(
+            "Team pref", min_value=0, max_value=500,
+            value=int(cfg.get("team_pref_penalty", 2)),
+            help="Penalty per shift assigned outside a staff member's preferred team shift",
+            key=f"team_pref_{roster_type}",
+        )
 
     st.divider()
 

@@ -17,7 +17,7 @@ Usage:
     df = s.solve_and_export()
 """
 
-import os, io, copy, shutil
+import os, copy, shutil
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -173,8 +173,8 @@ ROSTER_CONFIGS = {
             "saturday":8,"ph":6,"sunday":6,"friday":2,"weekday":1,
         },
         "call_points_scale": 2,
-        "soft_penalties": {"BLOCK":30,"REQUEST":30,"WRBLOCK":30},
-        "hard_blocks":    ["POSTCALL","COURSE","SUBSPEC","CLINIC","AUTOBLOCK"],
+        "soft_penalties": {"BLOCK":30,"REQUEST":30},
+        "hard_blocks":    ["POSTCALL","COURSE","SUBSPEC","CLINIC","AUTOBLOCK","WRBLOCK"],
         "leave_values":   ["LEAVE"],
         "limits":         {"wr_max":2,"sb_max":0,
                            "rp_r3_min":1,"rp_r3_max":3,
@@ -763,7 +763,6 @@ class RosterScheduler:
         pen_cfg   = self.cfg["soft_penalties"]
         all_sh    = self._all_shifts
         main_sh   = self._call_count
-        wr_sh     = self._sc_names("wr")
         penalties = []
 
         for s, staff in self.staff_data.iterrows():
@@ -777,10 +776,6 @@ class RosterScheduler:
                     p = model.NewBoolVar(f"pr_{s}_{d}")
                     model.Add(sum(sv[(s,d,sh)] for sh in main_sh) + p >= 1)
                     penalties.append((p, w))
-                elif val == "WRBLOCK":
-                    # discourages a WR round only, not other calls that day
-                    if wr_sh:
-                        penalties.append((sum(sv[(s,d,sh)] for sh in wr_sh), w))
                 else:
                     # any shift triggers the penalty
                     penalties.append((sum(sv[(s,d,sh)] for sh in all_sh), w))
@@ -907,7 +902,7 @@ class RosterScheduler:
 
         if self.template_path:
             xl_path = os.path.join(self.output_dir, stem + ".xlsx")
-            self._export_excel(df, solver, sv, xl_path)
+            self._export_excel(solver, sv, xl_path)
             print(f"Excel: {xl_path}")
 
         return df
@@ -972,7 +967,7 @@ class RosterScheduler:
         if not violations:
             print("  None")
 
-    def _export_excel(self, df, solver, sv, xl_path: str):
+    def _export_excel(self, solver, sv, xl_path: str):
         colors = {
             "LEAVE":     "D0CECE",
             "AUTOBLOCK": "D0CECE",
